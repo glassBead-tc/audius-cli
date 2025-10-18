@@ -1,13 +1,14 @@
 """
 A command-line interface for interacting with the Audius web3 streaming platform
-using its public API. This CLI is auto-generated from the provided OpenAPI
-specification and exposes each documented endpoint as a subcommand grouped
-by resource type. All API calls use HTTP GET and return JSON. You can
-override the default API base URL via the ``--base-url`` option.
+using its public API. This CLI supports both the REST API and GraphQL subgraph.
+The REST API provides access to content (tracks, playlists, users) while the
+GraphQL subgraph provides access to on-chain governance and staking data.
 
-Each command prints the raw JSON response from the API to stdout. On HTTP
+Each command prints the JSON response from the API to stdout. On HTTP
 errors a message is printed to stderr describing the failure.
 """
+import json
+import os
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -15,12 +16,17 @@ import click
 import requests
 
 DEFAULT_BASE_URL: str = "https://discoveryprovider.audius.co/v1"
+DEFAULT_GRAPHQL_ENDPOINT: str = "https://gateway.thegraph.com/api/{api_key}/subgraphs/id/F8TjrYuTLohz64J8uuDke9htSR1aY9TGCuEjJVVjUJaD"
 
 
 
 def _request(ctx: Dict[str, Any], method: str, path: str, path_params: Dict[str, Any], query_params: Dict[str, Any], header_params: Optional[Dict[str, Any]] = None) -> None:
     """Perform an HTTP request and print the response."""
     base_url: str = ctx.get('base_url', DEFAULT_BASE_URL)
+    format_output: str = ctx.get('format', 'pretty')
+    output_file: Optional[str] = ctx.get('output')
+    quiet_mode: bool = ctx.get('quiet', False)
+    
     for name, value in path_params.items():
         path = path.replace(f'{{{name}}}', str(value))
     url = base_url.rstrip('/') + path
@@ -33,28 +39,132 @@ def _request(ctx: Dict[str, Any], method: str, path: str, path_params: Dict[str,
                 params.append((name, item))
         else:
             params.append((name, value))
+    
     try:
         resp = requests.request(method=method, url=url, params=params, headers=header_params)
     except requests.exceptions.RequestException as exc:
         click.echo(f"Network error: {exc}", err=True)
         sys.exit(1)
+    
     if resp.status_code >= 400:
         click.echo(f"Request failed with status {resp.status_code}: {resp.text}", err=True)
         sys.exit(resp.status_code)
+    
     try:
         data = resp.json()
-        click.echo(click.style("JSON response:", fg="green"))
-        click.echo(data)
+        
+        # Extract just the data array if quiet mode
+        if quiet_mode and isinstance(data, dict) and 'data' in data:
+            data = data['data']
+        
+        # Format output
+        if format_output == 'pretty':
+            output = json.dumps(data, indent=2, ensure_ascii=False)
+        elif format_output == 'compact':
+            output = json.dumps(data, ensure_ascii=False)
+        else:  # raw
+            output = str(data)
+        
+        # Write to file or stdout
+        if output_file:
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(output)
+            if not quiet_mode:
+                click.echo(click.style(f"Response saved to {output_file}", fg="green"))
+        else:
+            if not quiet_mode:
+                click.echo(click.style("JSON response:", fg="green"))
+            click.echo(output)
     except ValueError:
         click.echo(resp.text)
 
 
+def _graphql_request(ctx: Dict[str, Any], query: str, variables: Optional[Dict[str, Any]] = None) -> None:
+    """Perform a GraphQL request and print the response."""
+    api_key: Optional[str] = ctx.get('graphql_api_key')
+    if not api_key:
+        click.echo("Error: GraphQL API key required. Set AUDIUS_GRAPHQL_KEY environment variable or use --graphql-api-key option.", err=True)
+        sys.exit(1)
+    
+    format_output: str = ctx.get('format', 'pretty')
+    output_file: Optional[str] = ctx.get('output')
+    quiet_mode: bool = ctx.get('quiet', False)
+    
+    # Build endpoint URL with API key
+    endpoint = DEFAULT_GRAPHQL_ENDPOINT.format(api_key=api_key)
+    
+    # Prepare GraphQL request body
+    payload = {'query': query}
+    if variables:
+        payload['variables'] = variables
+    
+    try:
+        resp = requests.post(endpoint, json=payload, headers={'Content-Type': 'application/json'})
+    except requests.exceptions.RequestException as exc:
+        click.echo(f"Network error: {exc}", err=True)
+        sys.exit(1)
+    
+    if resp.status_code >= 400:
+        click.echo(f"Request failed with status {resp.status_code}: {resp.text}", err=True)
+        sys.exit(resp.status_code)
+    
+    try:
+        result = resp.json()
+        
+        # Check for GraphQL errors
+        if 'errors' in result:
+            click.echo("GraphQL Errors:", err=True)
+            for error in result['errors']:
+                click.echo(f"  - {error.get('message', str(error))}", err=True)
+            if 'data' not in result or result['data'] is None:
+                sys.exit(1)
+        
+        # Extract data
+        data = result.get('data', result)
+        
+        # Format output
+        if format_output == 'pretty':
+            output = json.dumps(data, indent=2, ensure_ascii=False)
+        elif format_output == 'compact':
+            output = json.dumps(data, ensure_ascii=False)
+        else:  # raw
+            output = str(data)
+        
+        # Write to file or stdout
+        if output_file:
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(output)
+            if not quiet_mode:
+                click.echo(click.style(f"Response saved to {output_file}", fg="green"))
+        else:
+            if not quiet_mode:
+                click.echo(click.style("GraphQL response:", fg="cyan"))
+            click.echo(output)
+    except ValueError as e:
+        click.echo(f"Invalid JSON response: {e}", err=True)
+        click.echo(resp.text)
+        sys.exit(1)
+
+
 @click.group()
 @click.option('--base-url', default=DEFAULT_BASE_URL, help='Base URL of the Audius API', show_default=False)
+@click.option('--graphql-api-key', envvar='AUDIUS_GRAPHQL_KEY', help='The Graph API key for GraphQL queries (or set AUDIUS_GRAPHQL_KEY env var)')
+@click.option('--format', type=click.Choice(['pretty', 'compact', 'raw']), default='pretty', help='Output format for JSON responses')
+@click.option('--output', '-o', type=click.Path(), help='Write output to file instead of stdout')
+@click.option('--quiet', '-q', is_flag=True, help='Quiet mode - only show data array without metadata')
 @click.pass_context
-def cli(ctx: click.Context, base_url: str) -> None:
-    """Audius API command-line interface."""
-    ctx.obj = {'base_url': base_url}
+def cli(ctx: click.Context, base_url: str, graphql_api_key: Optional[str], format: str, output: Optional[str], quiet: bool) -> None:
+    """Audius API command-line interface.
+    
+    Supports both REST API (content) and GraphQL (governance/staking) endpoints.
+    """
+    ctx.obj = {
+        'base_url': base_url,
+        'graphql_api_key': graphql_api_key,
+        'format': format,
+        'output': output,
+        'quiet': quiet
+    }
 
 
 
@@ -1120,6 +1230,182 @@ def verify_id_token(ctx: Dict[str, Any], token: Optional[str]) -> None:
     headers = None
     path_vals = {}
     _request(ctx, 'GET', '/users/verify_token', path_vals, query, headers)
+
+
+
+@cli.group(name='graphql')
+def graphql() -> None:
+    """GraphQL subgraph queries for governance and staking data"""
+    pass
+
+@graphql.command(name='query')
+@click.argument('graphql_query')
+@click.option('--variables', '-v', help='GraphQL variables as JSON string')
+@click.pass_obj
+def raw_query(ctx: Dict[str, Any], graphql_query: str, variables: Optional[str]) -> None:
+    """Execute a custom GraphQL query
+    
+    Example:
+        python websets-cli.py graphql query '{ audiusNetwork { totalSupply } }'
+    """
+    vars_dict = None
+    if variables:
+        try:
+            vars_dict = json.loads(variables)
+        except json.JSONDecodeError as e:
+            click.echo(f"Invalid JSON in variables: {e}", err=True)
+            sys.exit(1)
+    
+    _graphql_request(ctx, graphql_query, vars_dict)
+
+@graphql.command(name='network-stats')
+@click.pass_obj
+def network_stats(ctx: Dict[str, Any]) -> None:
+    """Get Audius network statistics and metrics"""
+    query = """
+    {
+      audiusNetwork {
+        id
+        totalSupply
+        totalTokensStaked
+        totalTokensDelegated
+        totalTokensClaimable
+        maxDelegators
+        minDelegationAmount
+        undelegateLockupDuration
+      }
+    }
+    """
+    _graphql_request(ctx, query)
+
+@graphql.command(name='service-nodes')
+@click.option('--type', 'node_type', help='Filter by service type (discovery-node or content-node)')
+@click.option('--limit', type=int, default=10, help='Number of results to return')
+@click.pass_obj
+def service_nodes(ctx: Dict[str, Any], node_type: Optional[str], limit: int) -> None:
+    """List service nodes (discovery and content nodes)"""
+    where_clause = ""
+    if node_type:
+        where_clause = f'where: {{type: "{node_type}"}}'
+    
+    query = f"""
+    {{
+      serviceNodes(first: {limit}, {where_clause}, orderBy: createdAt, orderDirection: desc) {{
+        id
+        spId
+        owner {{
+          id
+        }}
+        type
+        endpoint
+        delegateOwnerWallet
+        createdAt
+        isRegistered
+      }}
+    }}
+    """
+    _graphql_request(ctx, query)
+
+@graphql.command(name='proposals')
+@click.option('--status', help='Filter by status (pending, active, executed, vetoed, etc.)')
+@click.option('--limit', type=int, default=10, help='Number of results to return')
+@click.pass_obj
+def proposals(ctx: Dict[str, Any], status: Optional[str], limit: int) -> None:
+    """List governance proposals"""
+    where_clause = ""
+    if status:
+        where_clause = f'where: {{outcome: "{status}"}}'
+    
+    query = f"""
+    {{
+      proposals(first: {limit}, {where_clause}, orderBy: submittedBlockNumber, orderDirection: desc) {{
+        id
+        proposalId
+        proposer {{
+          id
+        }}
+        name
+        description
+        outcome
+        voteMagnitudeYes
+        voteMagnitudeNo
+        numVotes
+        submittedBlockNumber
+        targetContractAddress
+        functionSignature
+      }}
+    }}
+    """
+    _graphql_request(ctx, query)
+
+@graphql.command(name='user')
+@click.argument('user_id')
+@click.pass_obj
+def user(ctx: Dict[str, Any], user_id: str) -> None:
+    """Get detailed information about a user (by ETH address)
+    
+    Example:
+        python websets-cli.py graphql user 0x1234...
+    """
+    query = f"""
+    {{
+      user(id: "{user_id.lower()}") {{
+        id
+        balance
+        totalClaimableAmount
+        totalStakedFor
+        totalDelegatedToServiceProviders
+        minAccountStake
+        deployerCut
+        serviceProviders {{
+          id
+          spId
+          type
+          endpoint
+        }}
+        claimRounds(first: 5, orderBy: blockNumber, orderDirection: desc) {{
+          id
+          blockNumber
+          fundingAmount
+        }}
+      }}
+    }}
+    """
+    _graphql_request(ctx, query)
+
+@graphql.command(name='delegates')
+@click.option('--from-user', help='Filter delegates from this user address')
+@click.option('--to-user', help='Filter delegates to this user address')
+@click.option('--limit', type=int, default=10, help='Number of results to return')
+@click.pass_obj
+def delegates(ctx: Dict[str, Any], from_user: Optional[str], to_user: Optional[str], limit: int) -> None:
+    """List delegation relationships"""
+    where_clauses = []
+    if from_user:
+        where_clauses.append(f'fromUser: "{from_user.lower()}"')
+    if to_user:
+        where_clauses.append(f'toUser: "{to_user.lower()}"')
+    
+    where_clause = ""
+    if where_clauses:
+        where_clause = 'where: {{' + ", ".join(where_clauses) + '}}'
+    
+    query = f"""
+    {{
+      delegates(first: {limit}, {where_clause}, orderBy: amount, orderDirection: desc) {{
+        id
+        fromUser {{
+          id
+        }}
+        toUser {{
+          id
+        }}
+        amount
+        claimableAmount
+      }}
+    }}
+    """
+    _graphql_request(ctx, query)
 
 if __name__ == '__main__':
     cli()
