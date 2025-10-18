@@ -1,3 +1,6 @@
 click>=8.0.0
 requests>=2.28.0
 PyYAML>=6.0
+
+# Optional: For AI-powered testing
+anthropic>=0.71.0
