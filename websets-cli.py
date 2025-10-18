@@ -7,17 +7,129 @@ GraphQL subgraph provides access to on-chain governance and staking data.
 Each command prints the JSON response from the API to stdout. On HTTP
 errors a message is printed to stderr describing the failure.
 """
+import hashlib
 import json
 import os
 import sys
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import click
 import requests
 
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
 DEFAULT_BASE_URL: str = "https://discoveryprovider.audius.co/v1"
 DEFAULT_GRAPHQL_ENDPOINT: str = "https://gateway.thegraph.com/api/{api_key}/subgraphs/id/F8TjrYuTLohz64J8uuDke9htSR1aY9TGCuEjJVVjUJaD"
+CONFIG_DIR: Path = Path.home() / ".audius-cli"
+CONFIG_FILE: Path = CONFIG_DIR / "config.yaml"
+CACHE_DIR: Path = CONFIG_DIR / "cache"
 
+
+def _load_config() -> Dict[str, Any]:
+    """Load configuration from config file if it exists."""
+    if not CONFIG_FILE.exists():
+        return {}
+    
+    if not HAS_YAML:
+        return {}
+    
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = yaml.safe_load(f) or {}
+        return config
+    except Exception as e:
+        click.echo(f"Warning: Could not load config file: {e}", err=True)
+        return {}
+
+
+def _get_cache_key(url: str, params: List[tuple]) -> str:
+    """Generate cache key from URL and parameters."""
+    cache_str = url + str(sorted(params))
+    return hashlib.md5(cache_str.encode()).hexdigest()
+
+
+def _get_from_cache(cache_key: str, max_age: int) -> Optional[Dict[str, Any]]:
+    """Retrieve response from cache if valid."""
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    
+    if not cache_file.exists():
+        return None
+    
+    try:
+        # Check if cache is expired
+        file_age = time.time() - cache_file.stat().st_mtime
+        if file_age > max_age:
+            cache_file.unlink()  # Remove expired cache
+            return None
+        
+        with open(cache_file, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_to_cache(cache_key: str, data: Dict[str, Any]) -> None:
+    """Save response to cache."""
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_file = CACHE_DIR / f"{cache_key}.json"
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+    except Exception as e:
+        # Silently fail on cache write errors
+        pass
+
+
+def _select_fields(data: Any, fields: str) -> Any:
+    """Extract specified fields from data using dot notation.
+    
+    Examples:
+        fields='title,user.handle' extracts just those fields
+        Works with both dicts and lists of dicts
+    """
+    if not fields:
+        return data
+    
+    field_list = [f.strip() for f in fields.split(',')]
+    
+    def extract_field(obj: Any, path: str) -> Any:
+        """Extract a single field using dot notation."""
+        parts = path.split('.')
+        current = obj
+        for part in parts:
+            if isinstance(current, dict):
+                current = current.get(part)
+            else:
+                return None
+            if current is None:
+                return None
+        return current
+    
+    def extract_fields(obj: Any) -> Dict[str, Any]:
+        """Extract multiple fields from a single object."""
+        result = {}
+        for field in field_list:
+            value = extract_field(obj, field)
+            if value is not None:
+                # Use the last part of the path as the key
+                key = field.split('.')[-1]
+                result[key] = value
+        return result
+    
+    # Handle list of objects
+    if isinstance(data, list):
+        return [extract_fields(item) for item in data]
+    # Handle single object
+    elif isinstance(data, dict):
+        return extract_fields(data)
+    else:
+        return data
 
 
 def _request(ctx: Dict[str, Any], method: str, path: str, path_params: Dict[str, Any], query_params: Dict[str, Any], header_params: Optional[Dict[str, Any]] = None) -> None:
@@ -26,6 +138,8 @@ def _request(ctx: Dict[str, Any], method: str, path: str, path_params: Dict[str,
     format_output: str = ctx.get('format', 'pretty')
     output_file: Optional[str] = ctx.get('output')
     quiet_mode: bool = ctx.get('quiet', False)
+    cache_ttl: Optional[int] = ctx.get('cache')
+    select_fields: Optional[str] = ctx.get('select')
     
     for name, value in path_params.items():
         path = path.replace(f'{{{name}}}', str(value))
@@ -40,50 +154,91 @@ def _request(ctx: Dict[str, Any], method: str, path: str, path_params: Dict[str,
         else:
             params.append((name, value))
     
-    try:
-        resp = requests.request(method=method, url=url, params=params, headers=header_params)
-    except requests.exceptions.RequestException as exc:
-        click.echo(f"Network error: {exc}", err=True)
-        sys.exit(1)
+    # Check cache for GET requests
+    data = None
+    if method == 'GET' and cache_ttl and cache_ttl > 0:
+        cache_key = _get_cache_key(url, params)
+        data = _get_from_cache(cache_key, cache_ttl)
+        if data is not None and not quiet_mode:
+            click.echo(click.style("[From cache]", fg="yellow"), err=True)
     
-    if resp.status_code >= 400:
-        click.echo(f"Request failed with status {resp.status_code}: {resp.text}", err=True)
-        sys.exit(resp.status_code)
+    # Make request if not cached
+    if data is None:
+        try:
+            resp = requests.request(method=method, url=url, params=params, headers=header_params)
+        except requests.exceptions.RequestException as exc:
+            # Improved error message
+            click.echo(f"Network error: {exc}", err=True)
+            click.echo("Hint: Check your internet connection and try again.", err=True)
+            sys.exit(1)
     
-    try:
-        data = resp.json()
+        if resp.status_code >= 400:
+            # Improved error messages with hints
+            error_msg = f"Request failed with status {resp.status_code}"
+            if resp.status_code == 404:
+                error_msg += "\nHint: Resource not found. Check the ID or URL path."
+            elif resp.status_code == 429:
+                error_msg += "\nHint: Rate limit exceeded. Please wait a moment before trying again."
+            elif resp.status_code >= 500:
+                error_msg += "\nHint: Server error. The Audius API may be experiencing issues. Try again later."
+            click.echo(f"{error_msg}\nResponse: {resp.text}", err=True)
+            sys.exit(resp.status_code)
         
-        # Extract just the data array if quiet mode
-        if quiet_mode and isinstance(data, dict) and 'data' in data:
-            data = data['data']
-        
-        # Format output
-        if format_output == 'pretty':
-            output = json.dumps(data, indent=2, ensure_ascii=False)
-        elif format_output == 'compact':
-            output = json.dumps(data, ensure_ascii=False)
-        else:  # raw
-            output = str(data)
-        
-        # Write to file or stdout
-        if output_file:
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(output)
-            if not quiet_mode:
-                click.echo(click.style(f"Response saved to {output_file}", fg="green"))
+        try:
+            data = resp.json()
+            
+            # Save to cache if enabled
+            if method == 'GET' and cache_ttl and cache_ttl > 0:
+                cache_key = _get_cache_key(url, params)
+                _save_to_cache(cache_key, data)
+        except ValueError:
+            click.echo(resp.text)
+            return
+    
+    # Apply field selection before extracting data array
+    if select_fields:
+        # If response has a 'data' key, apply selection to that
+        if isinstance(data, dict) and 'data' in data:
+            data['data'] = _select_fields(data['data'], select_fields)
         else:
-            if not quiet_mode:
-                click.echo(click.style("JSON response:", fg="green"))
-            click.echo(output)
-    except ValueError:
-        click.echo(resp.text)
+            data = _select_fields(data, select_fields)
+    
+    # Extract just the data array if quiet mode
+    if quiet_mode and isinstance(data, dict) and 'data' in data:
+        data = data['data']
+    
+    # Format output
+    if format_output == 'pretty':
+        output = json.dumps(data, indent=2, ensure_ascii=False)
+    elif format_output == 'compact':
+        output = json.dumps(data, ensure_ascii=False)
+    else:  # raw
+        output = str(data)
+    
+    # Write to file or stdout
+    if output_file:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(output)
+        if not quiet_mode:
+            click.echo(click.style(f"Response saved to {output_file}", fg="green"))
+    else:
+        if not quiet_mode:
+            click.echo(click.style("JSON response:", fg="green"))
+        click.echo(output)
 
 
 def _graphql_request(ctx: Dict[str, Any], query: str, variables: Optional[Dict[str, Any]] = None) -> None:
     """Perform a GraphQL request and print the response."""
     api_key: Optional[str] = ctx.get('graphql_api_key')
     if not api_key:
-        click.echo("Error: GraphQL API key required. Set AUDIUS_GRAPHQL_KEY environment variable or use --graphql-api-key option.", err=True)
+        click.echo("Error: GraphQL API key required.", err=True)
+        click.echo("\nHow to get an API key:", err=True)
+        click.echo("1. Visit https://thegraph.com/studio/apikeys/", err=True)
+        click.echo("2. Create a free account and generate an API key", err=True)
+        click.echo("3. Set it via:", err=True)
+        click.echo("   - Environment variable: export AUDIUS_GRAPHQL_KEY=your-key", err=True)
+        click.echo("   - CLI flag: --graphql-api-key your-key", err=True)
+        click.echo("   - Config file: ~/.audius-cli/config.yaml", err=True)
         sys.exit(1)
     
     format_output: str = ctx.get('format', 'pretty')
@@ -147,23 +302,33 @@ def _graphql_request(ctx: Dict[str, Any], query: str, variables: Optional[Dict[s
 
 
 @click.group()
-@click.option('--base-url', default=DEFAULT_BASE_URL, help='Base URL of the Audius API', show_default=False)
+@click.option('--base-url', help='Base URL of the Audius API')
 @click.option('--graphql-api-key', envvar='AUDIUS_GRAPHQL_KEY', help='The Graph API key for GraphQL queries (or set AUDIUS_GRAPHQL_KEY env var)')
-@click.option('--format', type=click.Choice(['pretty', 'compact', 'raw']), default='pretty', help='Output format for JSON responses')
+@click.option('--format', type=click.Choice(['pretty', 'compact', 'raw']), help='Output format for JSON responses')
 @click.option('--output', '-o', type=click.Path(), help='Write output to file instead of stdout')
 @click.option('--quiet', '-q', is_flag=True, help='Quiet mode - only show data array without metadata')
+@click.option('--cache', type=int, help='Cache responses for N seconds (e.g., --cache 300 for 5 minutes)')
+@click.option('--select', '-s', help='Select specific fields from response (e.g., "title,user.handle,play_count")')
 @click.pass_context
-def cli(ctx: click.Context, base_url: str, graphql_api_key: Optional[str], format: str, output: Optional[str], quiet: bool) -> None:
+def cli(ctx: click.Context, base_url: Optional[str], graphql_api_key: Optional[str], format: Optional[str], output: Optional[str], quiet: bool, cache: Optional[int], select: Optional[str]) -> None:
     """Audius API command-line interface.
     
     Supports both REST API (content) and GraphQL (governance/staking) endpoints.
+    Configuration can be set via ~/.audius-cli/config.yaml, environment variables, or CLI flags.
+    Priority: CLI flags > environment variables > config file > defaults
     """
+    # Load config file
+    config = _load_config()
+    
+    # Build context with priority: CLI args > env vars > config > defaults
     ctx.obj = {
-        'base_url': base_url,
-        'graphql_api_key': graphql_api_key,
-        'format': format,
-        'output': output,
-        'quiet': quiet
+        'base_url': base_url or os.environ.get('AUDIUS_BASE_URL') or config.get('base_url') or DEFAULT_BASE_URL,
+        'graphql_api_key': graphql_api_key or config.get('graphql_api_key'),
+        'format': format or config.get('format') or 'pretty',
+        'output': output or config.get('output'),
+        'quiet': quiet or config.get('quiet', False),
+        'cache': cache if cache is not None else config.get('cache'),
+        'select': select or config.get('select')
     }
 
 

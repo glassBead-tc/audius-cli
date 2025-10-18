@@ -1,0 +1,26 @@
+# Audius CLI Configuration File
+# Place this file at: ~/.audius-cli/config.yaml
+#
+# Priority order: CLI flags > environment variables > config file > defaults
+
+# REST API base URL
+# base_url: https://discoveryprovider.audius.co/v1
+
+# GraphQL API key from The Graph
+# Get one at: https://thegraph.com/studio/apikeys/
+# graphql_api_key: your-api-key-here
+
+# Default output format (pretty, compact, or raw)
+# format: pretty
+
+# Default cache duration in seconds (optional)
+# cache: 300  # Cache for 5 minutes
+
+# Default field selection (optional)
+# select: "title,user.handle,play_count"
+
+# Enable quiet mode by default (optional)
+# quiet: false
+
+# Default output file (optional)
+# output: /path/to/output.json

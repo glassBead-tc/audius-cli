@@ -4,10 +4,14 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-**Audius CLI** - A command-line interface for interacting with the Audius web3 streaming platform using its public API. The CLI is auto-generated from an OpenAPI specification and exposes each documented endpoint as a Click subcommand grouped by resource type.
+**Audius CLI** - A command-line interface for interacting with the Audius web3 streaming platform using both the REST API and GraphQL subgraph. The REST API provides access to content (tracks, playlists, users) while the GraphQL subgraph provides access to on-chain governance and staking data.
 
 **Repository:** Currently named `websets-cli` but refers to the Audius CLI.
-**Main file:** `websets-cli.py` (1126 lines, single-file architecture)
+**Main file:** `websets-cli.py` (~1430 lines, single-file architecture)
+
+**API Endpoints:**
+- REST API: `https://discoveryprovider.audius.co/v1` (public, no auth)
+- GraphQL: `https://gateway.thegraph.com/api/[key]/subgraphs/id/F8TjrYuTLohz64J8uuDke9htSR1aY9TGCuEjJVVjUJaD` (requires API key)
 
 ## Common Commands
 
@@ -33,6 +37,108 @@ python websets-cli.py users get_user_by_handle YourHandle
 python websets-cli.py --base-url https://custom.audius.host/v1 tracks get_trending_tracks
 ```
 
+### GraphQL Commands
+
+**Setup:**
+1. Get API key from [The Graph Studio](https://thegraph.com/studio/apikeys/)
+2. Set environment variable: `export AUDIUS_GRAPHQL_KEY=your-key-here`
+3. Or pass via flag: `--graphql-api-key your-key-here`
+
+```bash
+# Network statistics
+python websets-cli.py graphql network-stats
+
+# List service nodes (discovery/content nodes)
+python websets-cli.py graphql service-nodes --limit 10
+python websets-cli.py graphql service-nodes --type discovery-node
+
+# Governance proposals
+python websets-cli.py graphql proposals --limit 5
+python websets-cli.py graphql proposals --status executed
+
+# User info by ETH address
+python websets-cli.py graphql user 0x1234567890abcdef...
+
+# Delegation relationships
+python websets-cli.py graphql delegates --limit 20
+python websets-cli.py graphql delegates --from-user 0x1234...
+
+# Custom GraphQL query
+python websets-cli.py graphql query '{ audiusNetwork { totalSupply totalTokensStaked } }'
+
+# With variables
+python websets-cli.py graphql query 'query ($id: ID!) { user(id: $id) { balance } }' --variables '{"id": "0x123..."}'
+```
+
+### Output Formatting
+
+```bash
+# Pretty JSON (default)
+python websets-cli.py --format pretty tracks get_trending_tracks
+
+# Compact JSON (single line)
+python websets-cli.py --format compact tracks get_trending_tracks
+
+# Raw output
+python websets-cli.py --format raw tracks get_trending_tracks
+
+# Save to file
+python websets-cli.py --output tracks.json tracks get_trending_tracks
+
+# Quiet mode (data array only, no metadata)
+python websets-cli.py --quiet tracks get_trending_tracks
+```
+
+### Field Selection
+
+Extract specific fields from responses using `--select` with comma-separated paths:
+
+```bash
+# Select specific fields (works with nested paths)
+python websets-cli.py --select 'title,genre,play_count' tracks get_trending_tracks
+
+# Nested fields with dot notation
+python websets-cli.py --select 'title,user.handle,user.follower_count' tracks get_trending_tracks
+
+# Combine with quiet mode for clean output
+python websets-cli.py --quiet --select 'title,play_count' tracks get_trending_tracks
+```
+
+### Response Caching
+
+Cache API responses to reduce API calls and improve performance:
+
+```bash
+# Cache for 5 minutes (300 seconds)
+python websets-cli.py --cache 300 tracks get_trending_tracks
+
+# Cache for 1 hour
+python websets-cli.py --cache 3600 tracks get_trending_tracks
+
+# Second call will use cache (shows "[From cache]" indicator)
+python websets-cli.py --cache 300 tracks get_trending_tracks
+```
+
+**Cache location:** `~/.audius-cli/cache/`
+**Note:** Cache is automatically expired after the specified time
+
+### Configuration File
+
+Create `~/.audius-cli/config.yaml` to set default options:
+
+```yaml
+# Audius CLI Configuration
+base_url: https://discoveryprovider.audius.co/v1
+graphql_api_key: your-api-key-here
+format: pretty
+cache: 300  # Cache for 5 minutes by default
+select: "title,user.handle,play_count"  # Default field selection
+```
+
+**Priority:** CLI flags > environment variables > config file > defaults
+
+See `config.yaml.example` for full configuration options.
+
 ### Development Setup
 
 **Dependencies:**
@@ -40,10 +146,10 @@ python websets-cli.py --base-url https://custom.audius.host/v1 tracks get_trendi
 - `requests` - HTTP client
 
 ```bash
-# Install dependencies (manual for now - no requirements.txt present)
-pip install click requests
+# Install dependencies from requirements.txt
+pip install -r requirements.txt
 
-# Or if you want to develop:
+# Or install manually
 pip install click requests
 
 # Run the CLI directly
@@ -279,11 +385,11 @@ The generated code follows consistent patterns:
 
 The following sections need more information to be complete:
 
-### 1. **Dependency Management** ❌
-- [ ] No `requirements.txt`, `pyproject.toml`, or `setup.py` present
-- [ ] Python version requirements unknown
-- [ ] Need to create proper dependency specification
+### 1. **Dependency Management** ✅
+- [x] `requirements.txt` present with click and requests
+- [ ] Python version requirements unknown (recommend Python 3.7+)
 - [ ] Consider adding dev dependencies (black, ruff, mypy, pytest)
+- [ ] Consider upgrading to pyproject.toml for modern packaging
 
 ### 2. **OpenAPI Specification** ✅
 - [x] OpenAPI spec file: `audius-openapi-spec.yaml` (3386 lines, 89KB)
