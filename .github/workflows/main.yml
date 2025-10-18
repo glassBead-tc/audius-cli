@@ -1,0 +1,28 @@
+name: Run MCP Evaluations
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install dependencies
+        run: npm install
+        
+      - name: Run MCP Evaluations
+        uses: mclenhard/mcp-evals@v1.0.9
+        with:
+          evals_path: 'src/evals/evals.ts'    # Can also use .yaml files
+          server_path: 'src/index.ts'
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          model: 'gpt-4'  # Optional, defaults to gpt-4
