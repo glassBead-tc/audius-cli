@@ -21,7 +21,7 @@ except ImportError:
     HAS_ANTHROPIC = False
 
 # Path to CLI
-CLI_PATH = Path(__file__).parent.parent / "websets-cli.py"
+CLI_PATH = Path(__file__).parent.parent / "audius-cli.py"
 
 
 AGENT_SYSTEM_PROMPT = """You are a QA testing agent for the Audius CLI, a command-line tool for interacting with the Audius music platform.
@@ -55,9 +55,9 @@ Your goal is to thoroughly test the CLI by running various commands and validati
 
 ## What to Test
 
-- Run `python websets-cli.py --help` to see available commands
-- Test REST API calls like: `python websets-cli.py tracks get_trending_tracks --time week`
-- Test features like: `python websets-cli.py --select 'title,play_count' --quiet tracks get_trending_tracks --time week`
+- Run `python audius-cli.py --help` to see available commands
+- Test REST API calls like: `python audius-cli.py tracks get_trending_tracks --time week`
+- Test features like: `python audius-cli.py --select 'title,play_count' --quiet tracks get_trending_tracks --time week`
 - Test caching: Run same command twice with `--cache 60` and verify "[From cache]" appears
 - Test error messages: Try invalid track IDs and verify helpful errors
 - Test GraphQL without API key and verify helpful error message

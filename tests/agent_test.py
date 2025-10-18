@@ -22,7 +22,7 @@ BLUE = '\033[94m'
 RESET = '\033[0m'
 
 # Path to CLI script
-CLI_PATH = Path(__file__).parent.parent / "websets-cli.py"
+CLI_PATH = Path(__file__).parent.parent / "audius-cli.py"
 CACHE_DIR = Path.home() / ".audius-cli" / "cache"
 
 

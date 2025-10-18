@@ -1411,7 +1411,7 @@ def raw_query(ctx: Dict[str, Any], graphql_query: str, variables: Optional[str])
     """Execute a custom GraphQL query
     
     Example:
-        python websets-cli.py graphql query '{ audiusNetwork { totalSupply } }'
+        python audius-cli.py graphql query '{ audiusNetwork { totalSupply } }'
     """
     vars_dict = None
     if variables:
@@ -1510,7 +1510,7 @@ def user(ctx: Dict[str, Any], user_id: str) -> None:
     """Get detailed information about a user (by ETH address)
     
     Example:
-        python websets-cli.py graphql user 0x1234...
+        python audius-cli.py graphql user 0x1234...
     """
     query = f"""
     {{

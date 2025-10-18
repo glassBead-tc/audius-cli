@@ -1,6 +1,6 @@
-# websets-cli
+# Audius CLI
 
-A Python CLI project.
+A command-line interface for interacting with the Audius music platform API.
 
 ## Installation
 

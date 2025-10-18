@@ -6,8 +6,8 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 **Audius CLI** - A command-line interface for interacting with the Audius web3 streaming platform using both the REST API and GraphQL subgraph. The REST API provides access to content (tracks, playlists, users) while the GraphQL subgraph provides access to on-chain governance and staking data.
 
-**Repository:** Currently named `websets-cli` but refers to the Audius CLI.
-**Main file:** `websets-cli.py` (~1430 lines, single-file architecture)
+**Repository:** Currently named `audius-cli` but refers to the Audius CLI.
+**Main file:** `audius-cli.py` (~1430 lines, single-file architecture)
 
 **API Endpoints:**
 - REST API: `https://discoveryprovider.audius.co/v1` (public, no auth)
@@ -19,22 +19,22 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ```bash
 # Display help and available command groups
-python websets-cli.py --help
+python audius-cli.py --help
 
 # Display help for a specific group (e.g., tracks)
-python websets-cli.py tracks --help
+python audius-cli.py tracks --help
 
 # Display help for a specific command
-python websets-cli.py tracks get_track --help
+python audius-cli.py tracks get_track --help
 
 # Example: Get trending tracks
-python websets-cli.py tracks get_trending_tracks
+python audius-cli.py tracks get_trending_tracks
 
 # Example: Get a user by handle
-python websets-cli.py users get_user_by_handle YourHandle
+python audius-cli.py users get_user_by_handle YourHandle
 
 # Override the default API base URL
-python websets-cli.py --base-url https://custom.audius.host/v1 tracks get_trending_tracks
+python audius-cli.py --base-url https://custom.audius.host/v1 tracks get_trending_tracks
 ```
 
 ### GraphQL Commands
@@ -46,47 +46,47 @@ python websets-cli.py --base-url https://custom.audius.host/v1 tracks get_trendi
 
 ```bash
 # Network statistics
-python websets-cli.py graphql network-stats
+python audius-cli.py graphql network-stats
 
 # List service nodes (discovery/content nodes)
-python websets-cli.py graphql service-nodes --limit 10
-python websets-cli.py graphql service-nodes --type discovery-node
+python audius-cli.py graphql service-nodes --limit 10
+python audius-cli.py graphql service-nodes --type discovery-node
 
 # Governance proposals
-python websets-cli.py graphql proposals --limit 5
-python websets-cli.py graphql proposals --status executed
+python audius-cli.py graphql proposals --limit 5
+python audius-cli.py graphql proposals --status executed
 
 # User info by ETH address
-python websets-cli.py graphql user 0x1234567890abcdef...
+python audius-cli.py graphql user 0x1234567890abcdef...
 
 # Delegation relationships
-python websets-cli.py graphql delegates --limit 20
-python websets-cli.py graphql delegates --from-user 0x1234...
+python audius-cli.py graphql delegates --limit 20
+python audius-cli.py graphql delegates --from-user 0x1234...
 
 # Custom GraphQL query
-python websets-cli.py graphql query '{ audiusNetwork { totalSupply totalTokensStaked } }'
+python audius-cli.py graphql query '{ audiusNetwork { totalSupply totalTokensStaked } }'
 
 # With variables
-python websets-cli.py graphql query 'query ($id: ID!) { user(id: $id) { balance } }' --variables '{"id": "0x123..."}'
+python audius-cli.py graphql query 'query ($id: ID!) { user(id: $id) { balance } }' --variables '{"id": "0x123..."}'
 ```
 
 ### Output Formatting
 
 ```bash
 # Pretty JSON (default)
-python websets-cli.py --format pretty tracks get_trending_tracks
+python audius-cli.py --format pretty tracks get_trending_tracks
 
 # Compact JSON (single line)
-python websets-cli.py --format compact tracks get_trending_tracks
+python audius-cli.py --format compact tracks get_trending_tracks
 
 # Raw output
-python websets-cli.py --format raw tracks get_trending_tracks
+python audius-cli.py --format raw tracks get_trending_tracks
 
 # Save to file
-python websets-cli.py --output tracks.json tracks get_trending_tracks
+python audius-cli.py --output tracks.json tracks get_trending_tracks
 
 # Quiet mode (data array only, no metadata)
-python websets-cli.py --quiet tracks get_trending_tracks
+python audius-cli.py --quiet tracks get_trending_tracks
 ```
 
 ### Field Selection
@@ -95,13 +95,13 @@ Extract specific fields from responses using `--select` with comma-separated pat
 
 ```bash
 # Select specific fields (works with nested paths)
-python websets-cli.py --select 'title,genre,play_count' tracks get_trending_tracks
+python audius-cli.py --select 'title,genre,play_count' tracks get_trending_tracks
 
 # Nested fields with dot notation
-python websets-cli.py --select 'title,user.handle,user.follower_count' tracks get_trending_tracks
+python audius-cli.py --select 'title,user.handle,user.follower_count' tracks get_trending_tracks
 
 # Combine with quiet mode for clean output
-python websets-cli.py --quiet --select 'title,play_count' tracks get_trending_tracks
+python audius-cli.py --quiet --select 'title,play_count' tracks get_trending_tracks
 ```
 
 ### Response Caching
@@ -110,13 +110,13 @@ Cache API responses to reduce API calls and improve performance:
 
 ```bash
 # Cache for 5 minutes (300 seconds)
-python websets-cli.py --cache 300 tracks get_trending_tracks
+python audius-cli.py --cache 300 tracks get_trending_tracks
 
 # Cache for 1 hour
-python websets-cli.py --cache 3600 tracks get_trending_tracks
+python audius-cli.py --cache 3600 tracks get_trending_tracks
 
 # Second call will use cache (shows "[From cache]" indicator)
-python websets-cli.py --cache 300 tracks get_trending_tracks
+python audius-cli.py --cache 300 tracks get_trending_tracks
 ```
 
 **Cache location:** `~/.audius-cli/cache/`
@@ -153,27 +153,27 @@ pip install -r requirements.txt
 pip install click requests
 
 # Run the CLI directly
-python websets-cli.py --help
+python audius-cli.py --help
 ```
 
 ### Testing and Validation
 
 ```bash
 # Quick validation - test CLI loads and shows help
-python websets-cli.py --help
+python audius-cli.py --help
 
 # Test a specific command group
-python websets-cli.py users --help
+python audius-cli.py users --help
 
 # Test a real API call (read-only)
-python websets-cli.py tracks get_trending_tracks --time week
+python audius-cli.py tracks get_trending_tracks --time week
 ```
 
 ## Architecture
 
 ### Single-File Click Application
 
-The entire CLI is contained in `websets-cli.py` with the following structure:
+The entire CLI is contained in `audius-cli.py` with the following structure:
 
 1. **Imports and Constants** (lines 1-17)
    - `click` for CLI framework
@@ -310,7 +310,7 @@ def _request(ctx, method, path, path_params, query_params, header_params=None):
 
 **Override:** Use `--base-url` flag at the CLI root level:
 ```bash
-python websets-cli.py --base-url https://custom.host/v1 tracks get_trending_tracks
+python audius-cli.py --base-url https://custom.host/v1 tracks get_trending_tracks
 ```
 
 **No environment variable support** - base URL must be specified via CLI flag.
@@ -369,7 +369,7 @@ Since this is auto-generated from an OpenAPI spec, manual additions should be av
 2. Regenerate the CLI file using the codegen tool
 3. Maintain this WARP.md separately
 
-**Note:** The codegen process is not yet documented. The `websets-cli.py` file appears to be generated using a custom script rather than standard OpenAPI generators.
+**Note:** The codegen process is not yet documented. The `audius-cli.py` file appears to be generated using a custom script rather than standard OpenAPI generators.
 
 ### Code Style
 
@@ -397,7 +397,7 @@ The following sections need more information to be complete:
 - [x] API title: "API" (Audius V1 API)
 - [x] Default server: `https://discoveryprovider.audius.co/v1`
 - [ ] Codegen tool used for generation unknown (likely custom script based on the code structure)
-- [ ] Regeneration instructions needed - need to document the process used to generate `websets-cli.py` from the spec
+- [ ] Regeneration instructions needed - need to document the process used to generate `audius-cli.py` from the spec
 
 ### 3. **Installation & Distribution** 📦
 - [ ] No package metadata (setup.py/pyproject.toml)
@@ -441,7 +441,7 @@ The following sections need more information to be complete:
 
 **Priority 1 - Essential:**
 1. ~~Provide OpenAPI specification file~~ ✅ Complete - `audius-openapi-spec.yaml` is present
-2. Document codegen process/tool (determine which tool generated `websets-cli.py`)
+2. Document codegen process/tool (determine which tool generated `audius-cli.py`)
 3. Create `requirements.txt` or `pyproject.toml`
 4. Add proper README with installation and usage examples
 
